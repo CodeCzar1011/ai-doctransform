@@ -4,7 +4,7 @@ services:
     env: python
     buildCommand: |
       pip install --upgrade pip setuptools wheel
-      pip install --only-binary=:all: --no-cache-dir -r requirements.txt
+      pip install --only-binary=:all: -r requirements.txt
       cd Crownix && python init_db.py init
     startCommand: cd Crownix && python app.py
     envVars:

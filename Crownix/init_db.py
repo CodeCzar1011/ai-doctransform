@@ -46,7 +46,7 @@ def create_app():
     
     # Import models to register them
     with app.app_context():
-        from models import User, DocumentModel, ProcessingJob, APIUsage
+        from models import User, Document, ProcessingJob, APIUsage
     
     return app, db
 

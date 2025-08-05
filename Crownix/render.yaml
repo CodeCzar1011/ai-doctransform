@@ -3,10 +3,11 @@ services:
     name: crownix-app
     env: python
     buildCommand: |
+      cd Crownix
       pip install --upgrade pip setuptools wheel
       pip install --only-binary=:all: --no-build-isolation -r requirements.txt
       python init_db.py init
-    startCommand: python app.py
+    startCommand: cd Crownix && python app.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.7

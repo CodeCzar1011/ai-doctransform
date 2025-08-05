@@ -13,10 +13,17 @@ import io
 from datetime import datetime
 import uuid
 
+# Database imports
+from models import db, User, Document as DocumentModel, ProcessingJob, APIUsage
+from database import init_database, create_tables
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['SECRET_KEY'] = 'your-secret-key-here'
+
+# Initialize database
+db_instance, migrate = init_database(app)
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -80,6 +87,122 @@ def index():
     """Serve the main HTML page"""
     return render_template('index.html')
 
+@app.route('/api/documents', methods=['GET'])
+def get_documents():
+    """Get all documents with pagination"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        
+        documents = DocumentModel.query.order_by(DocumentModel.upload_time.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        return jsonify({
+            'success': True,
+            'documents': [doc.to_dict() for doc in documents.items],
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': documents.total,
+                'pages': documents.pages
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to fetch documents: {str(e)}'}), 500
+
+@app.route('/api/documents/<document_uuid>', methods=['GET'])
+def get_document(document_uuid):
+    """Get a specific document by UUID"""
+    try:
+        document = DocumentModel.query.filter_by(uuid=document_uuid).first()
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'document': document.to_dict(),
+            'extracted_text': document.extracted_text
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to fetch document: {str(e)}'}), 500
+
+@app.route('/api/processing-jobs', methods=['GET'])
+def get_processing_jobs():
+    """Get processing jobs with pagination"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        status = request.args.get('status')  # Optional status filter
+        
+        query = ProcessingJob.query
+        if status:
+            query = query.filter_by(status=status)
+        
+        jobs = query.order_by(ProcessingJob.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        return jsonify({
+            'success': True,
+            'jobs': [job.to_dict() for job in jobs.items],
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': jobs.total,
+                'pages': jobs.pages
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to fetch processing jobs: {str(e)}'}), 500
+
+@app.route('/api/processing-jobs/<job_uuid>', methods=['GET'])
+def get_processing_job(job_uuid):
+    """Get a specific processing job by UUID"""
+    try:
+        job = ProcessingJob.query.filter_by(uuid=job_uuid).first()
+        if not job:
+            return jsonify({'error': 'Processing job not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'job': job.to_dict(),
+            'input_text': job.input_text,
+            'output_text': job.output_text
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to fetch processing job: {str(e)}'}), 500
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    """Get application statistics"""
+    try:
+        total_documents = DocumentModel.query.count()
+        total_jobs = ProcessingJob.query.count()
+        completed_jobs = ProcessingJob.query.filter_by(status='completed').count()
+        failed_jobs = ProcessingJob.query.filter_by(status='failed').count()
+        
+        # Get recent activity (last 7 days)
+        from datetime import timedelta
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        recent_documents = DocumentModel.query.filter(DocumentModel.upload_time >= week_ago).count()
+        recent_jobs = ProcessingJob.query.filter(ProcessingJob.created_at >= week_ago).count()
+        
+        return jsonify({
+            'success': True,
+            'stats': {
+                'total_documents': total_documents,
+                'total_jobs': total_jobs,
+                'completed_jobs': completed_jobs,
+                'failed_jobs': failed_jobs,
+                'success_rate': (completed_jobs / total_jobs * 100) if total_jobs > 0 else 0,
+                'recent_documents': recent_documents,
+                'recent_jobs': recent_jobs
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to fetch stats: {str(e)}'}), 500
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """Handle file upload and text extraction"""
@@ -101,23 +224,34 @@ def upload_file():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
         file.save(file_path)
         
+        # Get file size
+        file_size = os.path.getsize(file_path)
+        
         # Extract text
         extracted_text = extract_text_from_file(file_path, file_extension)
         
-        # Store file info in session or return with response
-        file_info = {
-            'filename': filename,
-            'unique_filename': unique_filename,
-            'file_path': file_path,
-            'file_extension': file_extension,
-            'extracted_text': extracted_text,
-            'upload_time': datetime.now().isoformat()
-        }
+        # Create document record in database
+        document = DocumentModel(
+            original_filename=filename,
+            unique_filename=unique_filename,
+            file_path=file_path,
+            file_extension=file_extension,
+            file_size=file_size,
+            mime_type=file.content_type,
+            extracted_text=extracted_text,
+            extraction_status='completed' if extracted_text else 'failed',
+            processed_at=datetime.utcnow()
+        )
         
+        db.session.add(document)
+        db.session.commit()
+        
+        # Return response with document info
         return jsonify({
             'success': True,
             'message': 'File uploaded and processed successfully',
-            'file_info': file_info
+            'document': document.to_dict(),
+            'extracted_text': extracted_text
         })
         
     except Exception as e:
@@ -132,9 +266,22 @@ def webhook():
     
     user_query = data.get('query', '')
     document_text = data.get('document_text', '')
+    document_id = data.get('document_id')  # Optional document ID
+    job_type = data.get('job_type', 'general_query')  # Type of processing
     
     if not user_query or not document_text:
         return jsonify({'error': 'Both query and document_text are required'}), 400
+    
+    # Create processing job record
+    processing_job = ProcessingJob(
+        job_type=job_type,
+        input_text=f"Query: {user_query}\n\nDocument: {document_text[:1000]}...",  # Truncate for storage
+        document_id=document_id,
+        started_at=datetime.utcnow()
+    )
+    
+    db.session.add(processing_job)
+    db.session.commit()
     
     # Prepare the prompt for Gemini
     system_prompt = "You are an AI document assistant. You can: Summarize documents, suggest edits and improvements, convert content to different formats, and answer questions about the document content. Please provide your response in the following JSON format: {\"Summary\": \"Brief summary of the document or response to query\", \"EditsApplied\": [\"List of suggested edits or improvements\"], \"ConvertedFileLink\": \"If applicable, describe the converted format\", \"Answer\": \"Detailed answer to the user's query\"}"
@@ -156,6 +303,7 @@ def webhook():
     }
     
     try:
+        start_time = datetime.utcnow()
         gemini_response = requests.post(GEMINI_API_URL, params=params, headers=headers, data=json.dumps(payload))
         gemini_response.raise_for_status()
         result = gemini_response.json()
@@ -172,12 +320,43 @@ def webhook():
                 "Answer": ai_response
             }
         
+        # Update processing job with results
+        end_time = datetime.utcnow()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        processing_job.status = 'completed'
+        processing_job.output_text = ai_response
+        processing_job.completed_at = end_time
+        processing_job.processing_time = processing_time
+        
+        # Track API usage
+        api_usage = APIUsage(
+            processing_job_id=processing_job.id,
+            api_provider='gemini',
+            api_model='gemini-pro',
+            input_tokens=len(user_prompt.split()),  # Rough estimate
+            output_tokens=len(ai_response.split()),  # Rough estimate
+            total_tokens=len(user_prompt.split()) + len(ai_response.split()),
+            timestamp=end_time,
+            response_time=processing_time
+        )
+        
+        db.session.add(api_usage)
+        db.session.commit()
+        
         return jsonify({
             'success': True,
             'response': parsed_response,
-            'raw_ai_response': ai_response
+            'raw_ai_response': ai_response,
+            'processing_job_id': processing_job.uuid
         })
     except Exception as e:
+        # Update processing job with error
+        processing_job.status = 'failed'
+        processing_job.error_message = str(e)
+        processing_job.completed_at = datetime.utcnow()
+        db.session.commit()
+        
         return jsonify({'error': f'Gemini API request failed: {str(e)}'}), 500
 
 @app.route('/download/<filename>')
@@ -209,4 +388,12 @@ def logout():
     return render_template('index.html')
 
 if __name__ == '__main__':
+    # Initialize database tables
+    with app.app_context():
+        try:
+            db.create_all()
+            print("Database tables created successfully!")
+        except Exception as e:
+            print(f"Error creating database tables: {e}")
+    
     app.run(debug=True, host='0.0.0.0', port=5000)

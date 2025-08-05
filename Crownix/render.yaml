@@ -5,6 +5,7 @@ services:
     buildCommand: |
       pip install --upgrade pip setuptools wheel
       pip install --only-binary=:all: --no-build-isolation -r requirements.txt
+      python init_db.py init
     startCommand: python app.py
     envVars:
       - key: PYTHON_VERSION
@@ -18,3 +19,8 @@ services:
       - key: PIP_NO_BUILD_ISOLATION
         value: "1"
     plan: free
+
+databases:
+  - name: crownix-db
+    databaseName: crownix
+    user: crownix

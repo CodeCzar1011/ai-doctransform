@@ -1,0 +1,25 @@
+AI DocTransform - Sample Document
+
+Introduction
+This is a sample document created for testing the AI DocTransform application. The document contains various types of content that can be processed and analyzed by the AI assistant.
+
+Key Features
+1. Document Upload: Users can upload PDF, DOCX, and image files
+2. Text Extraction: Automatic extraction of text content from various formats
+3. AI Processing: OpenAI GPT integration for document analysis
+4. Modern Interface: Clean, responsive web interface
+
+Technical Implementation
+The application is built using Flask for the backend and HTML/CSS/JavaScript for the frontend. It uses specialized libraries like pdfplumber for PDF processing, python-docx for Word documents, and pytesseract for image text extraction.
+
+Benefits
+- Saves time in document processing
+- Provides intelligent insights and suggestions
+- Supports multiple file formats
+- User-friendly interface
+- Real-time processing capabilities
+
+Conclusion
+This sample document demonstrates the capabilities of the AI DocTransform application. Users can upload similar documents and ask questions about the content, request summaries, or get editing suggestions from the AI assistant.
+
+The system is designed to be scalable and can handle various document types and sizes. It provides a comprehensive solution for document analysis and processing needs. 

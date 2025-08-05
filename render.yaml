@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: crownix-app
+    env: python
+    buildCommand: |
+      pip install --upgrade pip setuptools wheel
+      pip install --only-binary=:all: --no-build-isolation -r requirements.txt
+      cd Crownix && python init_db.py init
+    startCommand: cd Crownix && python app.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.7
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: CRYPTOGRAPHY_DONT_BUILD_RUST
+        value: "1"
+      - key: PIP_ONLY_BINARY
+        value: ":all:"
+      - key: PIP_NO_BUILD_ISOLATION
+        value: "1"
+    plan: free
+
+databases:
+  - name: crownix-db
+    databaseName: crownix
+    user: crownix

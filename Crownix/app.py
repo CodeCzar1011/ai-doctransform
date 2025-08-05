@@ -39,15 +39,42 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def extract_text_from_pdf(file_path):
-    """Extract text from PDF using pdfplumber"""
+    """Extract text from PDF using pdfplumber with enhanced accuracy"""
     try:
         text = ""
         with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
+            for page_num, page in enumerate(pdf.pages, 1):
+                # Try multiple extraction methods for better accuracy
                 page_text = page.extract_text()
+                
+                # If standard extraction fails, try with different settings
+                if not page_text or len(page_text.strip()) < 10:
+                    # Try with different extraction settings
+                    page_text = page.extract_text(
+                        x_tolerance=3,
+                        y_tolerance=3,
+                        layout=True,
+                        x_density=7.25,
+                        y_density=13
+                    )
+                
+                # If still no text, try extracting from tables
+                if not page_text or len(page_text.strip()) < 10:
+                    tables = page.extract_tables()
+                    if tables:
+                        table_text = ""
+                        for table in tables:
+                            for row in table:
+                                if row:
+                                    table_text += " ".join([cell or "" for cell in row]) + "\n"
+                        page_text = table_text
+                
                 if page_text:
-                    text += page_text + "\n"
-        return text.strip()
+                    # Clean and normalize the text
+                    page_text = clean_extracted_text(page_text)
+                    text += f"\n--- Page {page_num} ---\n{page_text}\n"
+        
+        return text.strip() if text.strip() else "No text could be extracted from this PDF."
     except Exception as e:
         return f"Error extracting text from PDF: {str(e)}"
 

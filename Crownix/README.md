@@ -57,7 +57,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
-pip install -r requirement.txt
+pip install -r requirements.txt
 ```
 
 ### 4. Configure OpenAI API
@@ -258,7 +258,7 @@ Here are some example queries you can try:
 ```
 HackerX/
 ├── app.py                 # Main Flask application
-├── requirement.txt        # Python dependencies
+├── requirements.txt       # Python dependencies
 ├── README.md             # This file
 ├── templates/
 │   └── index.html        # Main web interface

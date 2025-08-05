@@ -4,10 +4,7 @@ services:
     env: python
     buildCommand: |
       pip install --upgrade pip setuptools wheel
-      export PIP_ONLY_BINARY=":all:"
-      export PIP_NO_BUILD_ISOLATION="1"
-      export CRYPTOGRAPHY_DONT_BUILD_RUST="1"
-      pip install --only-binary=:all: --no-build-isolation --prefer-binary --no-cache-dir -r requirements.txt
+      pip install --only-binary=:all: --no-cache-dir -r requirements.txt
       cd Crownix && python init_db.py init
     startCommand: cd Crownix && python app.py
     envVars:

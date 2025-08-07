@@ -37,7 +37,16 @@
                 <div class="main-container p-5">
                     <div class="text-center mb-5">
                         <h1 class="display-4 fw-bold text-primary mb-3">AI DocTransform</h1>
-                        <p class="lead text-muted">Upload documents, extract content, and get AI-powered insights</p>
+                        <p class="lead text-muted">Talk to your documents. Understand, Edit, Convert — Smarter.</p>
+                        <div class="alert alert-info mt-3">
+                            <strong>Example Use Cases:</strong>
+                            <ul class="mb-0 text-start" style="max-width:600px;margin:auto;">
+                                <li>A student uploads a PDF of a research paper and asks: <em>"Summarize this in simple terms."</em></li>
+                                <li>A user uploads a scanned government form and asks: <em>"What should I write in field 6?"</em></li>
+                                <li>An employee uploads a legal contract and types: <em>"Change all dates to 2025 and remove Clause 4."</em></li>
+                                <li>A user uploads a DOCX report and asks: <em>"Convert this to a clean PDF and fix the grammar."</em></li>
+                            </ul>
+                        </div>
                     </div>
 
                     <!-- File Upload -->
@@ -71,17 +80,34 @@
                         </div>
                     </div>
 
-                    <!-- AI Query -->
+                    <!-- AI Query / Chat -->
                     <div class="card mb-4" id="querySection" style="display: none;">
                         <div class="card-header bg-warning text-dark">
-                            <h5 class="mb-0">AI Assistant</h5>
+                            <h5 class="mb-0">AI-Powered Assistant</h5>
                         </div>
                         <div class="card-body">
                             <div class="mb-3">
-                                <label for="userQuery" class="form-label">Ask about your document:</label>
-                                <textarea class="form-control" id="userQuery" rows="3" placeholder="e.g., Summarize this document, suggest improvements..."></textarea>
+                                <label for="actionType" class="form-label">What would you like to do?</label>
+                                <select class="form-select mb-2" id="actionType">
+                                    <option value="qa">Ask a natural question (Q&amp;A)</option>
+                                    <option value="edit">Smart Edit (rephrase, summarize, change tone, etc.)</option>
+                                    <option value="convert">Format Converter</option>
+                                    <option value="summary">Summarize</option>
+                                </select>
+                                <textarea class="form-control mt-2" id="userQuery" rows="3" placeholder="Type your question or instruction (e.g., 'Summarize this', 'Change all dates to 2025', 'Convert to PDF')"></textarea>
+                                <div id="convertOptions" class="mt-2" style="display:none;">
+                                    <label for="targetFormat" class="form-label">Target Format:</label>
+                                    <select class="form-select" id="targetFormat">
+                                        <option value="pdf">PDF</option>
+                                        <option value="docx">DOCX</option>
+                                        <option value="markdown">Markdown</option>
+                                        <option value="html">HTML</option>
+                                        <option value="txt">Plain Text</option>
+                                        <option value="json">Structured JSON</option>
+                                    </select>
+                                </div>
                             </div>
-                            <button class="btn btn-warning" onclick="sendQuery()" id="queryBtn">Send Query</button>
+                            <button class="btn btn-warning" onclick="sendQuery()" id="queryBtn">Send</button>
                             <div class="mt-3" id="queryLoading" style="display: none;">
                                 <div class="spinner-border text-warning" role="status"></div>
                                 <span class="ms-2">Processing...</span>
@@ -118,17 +144,22 @@
             formData.append('file', file);
 
             try {
-                const response = await fetch('/upload', {
+                const response = await fetch('/api/document/enhanced-extract', {
                     method: 'POST',
                     body: formData
                 });
                 const data = await response.json();
 
                 if (data.success) {
-                    currentFileInfo = data.file_info;
+                    currentFileInfo = {
+                        document_uuid: data.document_uuid,
+                        filename: data.filename,
+                        file_type: data.file_type,
+                        extracted_text: data.extraction_result.text
+                    };
                     document.getElementById('fileName').textContent = file.name;
                     document.getElementById('fileInfo').style.display = 'block';
-                    document.getElementById('extractedText').value = data.file_info.extracted_text;
+                    document.getElementById('extractedText').value = data.extraction_result.text;
                     document.getElementById('extractedTextSection').style.display = 'block';
                     document.getElementById('querySection').style.display = 'block';
                 } else {
@@ -141,34 +172,52 @@
 
         // Send query
         async function sendQuery() {
+            const actionType = document.getElementById('actionType').value;
             const query = document.getElementById('userQuery').value.trim();
-            const extractedText = document.getElementById('extractedText').value.trim();
+            const documentUUID = currentFileInfo ? currentFileInfo.document_uuid : null;
+            const targetFormat = document.getElementById('targetFormat') ? document.getElementById('targetFormat').value : null;
 
-            if (!query) {
-                alert('Please enter a query');
+            if (!documentUUID) {
+                alert('Please upload a document first.');
+                return;
+            }
+            if (!query && actionType !== 'convert' && actionType !== 'summary') {
+                alert('Please enter a query or instruction.');
                 return;
             }
 
-            try {
-                document.getElementById('queryLoading').style.display = 'block';
-                document.getElementById('queryBtn').disabled = true;
+            document.getElementById('queryLoading').style.display = 'block';
+            document.getElementById('queryBtn').disabled = true;
 
-                const response = await fetch('/webhook', {
+            let endpoint = '';
+            let body = {};
+
+            if (actionType === 'qa') {
+                endpoint = '/api/document/qa';
+                body = { document_uuid: documentUUID, question: query };
+            } else if (actionType === 'edit') {
+                endpoint = '/api/document/smart-edit';
+                body = { document_uuid: documentUUID, edit_instruction: query };
+            } else if (actionType === 'convert') {
+                endpoint = '/api/document/convert';
+                body = { document_uuid: documentUUID, target_format: targetFormat };
+            } else if (actionType === 'summary') {
+                endpoint = '/api/document/summary';
+                body = { document_uuid: documentUUID, summary_type: query || 'brief' };
+            }
+
+            try {
+                const response = await fetch(endpoint, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        query: query,
-                        document_text: extractedText
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
                 });
                 const data = await response.json();
 
                 if (data.success) {
-                    displayAIResponse(data.response);
+                    displayAIResponse(data);
                 } else {
-                    alert('Query failed: ' + data.error);
+                    alert('Query failed: ' + (data.error || 'Unknown error'));
                 }
             } catch (error) {
                 alert('Query failed: ' + error.message);
@@ -181,47 +230,71 @@
         // Display AI response
         function displayAIResponse(response) {
             let html = '<div class="row">';
-            
-            if (response.Summary) {
-                html += `
-                    <div class="col-md-6 mb-3">
-                        <div class="card">
-                            <div class="card-header bg-primary text-white">Summary</div>
-                            <div class="card-body">${response.Summary}</div>
-                        </div>
-                    </div>
-                `;
-            }
-
-            if (response.Answer) {
+            // Q&A
+            if (response.answer) {
                 html += `
                     <div class="col-md-6 mb-3">
                         <div class="card">
                             <div class="card-header bg-info text-white">Answer</div>
-                            <div class="card-body">${response.Answer}</div>
+                            <div class="card-body">${response.answer}</div>
                         </div>
                     </div>
                 `;
             }
-
-            if (response.EditsApplied && response.EditsApplied.length > 0) {
+            // Smart Edit
+            if (response.edited_content) {
+                html += `
+                    <div class="col-md-6 mb-3">
+                        <div class="card">
+                            <div class="card-header bg-warning text-dark">Edited Content</div>
+                            <div class="card-body"><pre>${response.edited_content}</pre></div>
+                        </div>
+                    </div>
+                `;
+            }
+            // Conversion
+            if (response.download_url) {
                 html += `
                     <div class="col-12 mb-3">
                         <div class="card">
-                            <div class="card-header bg-warning text-dark">Suggested Edits</div>
+                            <div class="card-header bg-success text-white">Download</div>
                             <div class="card-body">
-                                <ul>${response.EditsApplied.map(edit => `<li>${edit}</li>`).join('')}</ul>
+                                <a href="${response.download_url}" class="btn btn-success" target="_blank">Download Converted File</a>
                             </div>
                         </div>
                     </div>
                 `;
             }
-
+            // Summary
+            if (response.summary) {
+                html += `
+                    <div class="col-12 mb-3">
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">Summary</div>
+                            <div class="card-body">${response.summary}</div>
+                        </div>
+                    </div>
+                `;
+            }
+            // Structured JSON
+            if (response.structured_data) {
+                html += `
+                    <div class="col-12 mb-3">
+                        <div class="card">
+                            <div class="card-header bg-secondary text-white">Structured JSON</div>
+                            <div class="card-body"><pre>${JSON.stringify(response.structured_data, null, 2)}</pre></div>
+                        </div>
+                    </div>
+                `;
+            }
             html += '</div>';
-            
             document.getElementById('aiResponse').innerHTML = html;
             document.getElementById('responseSection').style.display = 'block';
         }
+
+        document.getElementById('actionType').addEventListener('change', function() {
+            document.getElementById('convertOptions').style.display = this.value === 'convert' ? '' : 'none';
+        });
     </script>
 </body>
-</html> 
+</html>

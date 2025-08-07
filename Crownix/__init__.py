@@ -3,7 +3,7 @@ from flask import Flask
 from dotenv import load_dotenv
 
 # Import extensions
-from .extensions import db, bcrypt, login_manager
+from .extensions import db, bcrypt, login_manager, migrate
 
 def create_app():
     """Create and configure the Flask application."""
@@ -14,10 +14,22 @@ def create_app():
 
     # Configure app
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'a-default-secret-key')
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///crownix.db')
+    
+    # Database configuration
+    database_url = os.getenv('DATABASE_URL')
+    if database_url and database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///crownix.db'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
     app.config['UPLOAD_FOLDER'] = 'uploads'
+    
+    # Configure SQLite for better concurrency
+    if 'sqlite' in app.config['SQLALCHEMY_DATABASE_URI']:
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'connect_args': {'check_same_thread': False}
+        }
 
     # Ensure upload directory exists
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -26,8 +38,9 @@ def create_app():
     db.init_app(app)
     bcrypt.init_app(app)
     login_manager.init_app(app)
+    migrate.init_app(app, db)
 
-    # Need to import models here for the user_loader and create_all
+    # Import models here for the user_loader and create_all
     from . import models
 
     @login_manager.user_loader
@@ -38,8 +51,17 @@ def create_app():
     from .main import main as main_blueprint
     app.register_blueprint(main_blueprint, url_prefix='')
 
+    # Register database commands
+    from .init_db import register_commands
+    register_commands(app)
+    
+    # Initialize database within app context
     with app.app_context():
+        # Create tables if they don't exist
         db.create_all()
+        
+        # Create uploads directory if it doesn't exist
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
     return app
 

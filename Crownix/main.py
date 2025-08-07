@@ -6,6 +6,8 @@ from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.utils import secure_filename
 from datetime import datetime
 import logging
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 from .extensions import db, bcrypt
 from .models import User, Document, ChatMessage
@@ -74,6 +76,108 @@ def signup():
 def logout():
     logout_user()
     return jsonify({'success': True, 'message': 'You have been logged out.'})
+
+@main.route('/auth/google', methods=['POST'])
+def google_auth():
+    """Handle Google OAuth authentication"""
+    try:
+        data = request.get_json()
+        credential = data.get('credential')
+        action = data.get('action', 'login')  # 'login' or 'signup'
+        
+        if not credential:
+            return jsonify({'success': False, 'error': 'No credential provided'}), 400
+        
+        # Verify the Google ID token
+        # Note: Replace 'YOUR_GOOGLE_CLIENT_ID' with actual client ID from environment
+        GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID')
+        
+        try:
+            # Verify the token with Google
+            idinfo = id_token.verify_oauth2_token(
+                credential, google_requests.Request(), GOOGLE_CLIENT_ID
+            )
+            
+            # Extract user information from Google
+            google_id = idinfo['sub']
+            email = idinfo['email']
+            name = idinfo.get('name', email.split('@')[0])
+            picture = idinfo.get('picture', '')
+            
+            # Check if user already exists
+            user = User.query.filter_by(email=email).first()
+            
+            if user:
+                # User exists - update Google info if needed
+                if not user.google_id:
+                    user.google_id = google_id
+                    user.auth_provider = 'google'
+                    user.profile_picture = picture
+                    db.session.commit()
+                
+                login_user(user, remember=True)
+                return jsonify({
+                    'success': True, 
+                    'message': 'Google sign-in successful',
+                    'user': {
+                        'id': user.id,
+                        'username': user.username,
+                        'email': user.email,
+                        'profile_picture': user.profile_picture
+                    }
+                })
+            
+            elif action == 'signup':
+                # Create new user with Google OAuth
+                # Generate unique username if needed
+                base_username = name.replace(' ', '').lower()
+                username = base_username
+                counter = 1
+                while User.query.filter_by(username=username).first():
+                    username = f"{base_username}{counter}"
+                    counter += 1
+                
+                new_user = User(
+                    username=username,
+                    email=email,
+                    google_id=google_id,
+                    profile_picture=picture,
+                    auth_provider='google'
+                )
+                
+                db.session.add(new_user)
+                db.session.commit()
+                
+                login_user(new_user, remember=True)
+                return jsonify({
+                    'success': True, 
+                    'message': 'Google sign-up successful',
+                    'user': {
+                        'id': new_user.id,
+                        'username': new_user.username,
+                        'email': new_user.email,
+                        'profile_picture': new_user.profile_picture
+                    }
+                })
+            
+            else:
+                return jsonify({
+                    'success': False, 
+                    'error': 'Account not found. Please sign up first.'
+                }), 404
+        
+        except ValueError as e:
+            return jsonify({
+                'success': False, 
+                'error': f'Invalid Google token: {str(e)}'
+            }), 400
+    
+    except Exception as e:
+        logger.error(f"Google OAuth error: {str(e)}")
+        return jsonify({
+            'success': False, 
+            'error': 'Google authentication failed'
+        }), 500
 
 # --- DOCUMENT & FILE ROUTES ---
 @main.route('/upload', methods=['POST'])

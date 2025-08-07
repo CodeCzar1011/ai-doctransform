@@ -9,7 +9,10 @@ class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=True)  # Nullable for Google OAuth users
+    google_id = db.Column(db.String(100), unique=True, nullable=True)  # Google OAuth ID
+    profile_picture = db.Column(db.String(500), nullable=True)  # Google profile picture URL
+    auth_provider = db.Column(db.String(20), default='local')  # 'local' or 'google'
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
 

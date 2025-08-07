@@ -53,7 +53,9 @@ def login():
             login_user(user, remember=True)
             return jsonify({'success': True, 'message': 'Logged in successfully.'})
         return jsonify({'success': False, 'error': 'Invalid email or password.'}), 401
-    return render_template('login.html')
+    
+    google_client_id = os.getenv('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID')
+    return render_template('login.html', google_client_id=google_client_id)
 
 @main.route('/signup', methods=['GET', 'POST'])
 def signup():
@@ -69,7 +71,10 @@ def signup():
         db.session.commit()
         login_user(new_user, remember=True)
         return jsonify({'success': True, 'message': 'Signup successful. You are now logged in.'})
-    return render_template('signup.html')
+    
+    # Pass Google Client ID to template
+    google_client_id = os.getenv('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID')
+    return render_template('signup.html', google_client_id=google_client_id)
 
 @main.route('/logout')
 @login_required

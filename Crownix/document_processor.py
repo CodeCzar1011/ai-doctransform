@@ -8,6 +8,7 @@ import json
 import io
 import tempfile
 import logging
+import re
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 import uuid
@@ -30,14 +31,14 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from fpdf import FPDF
-import weasyprint
 
 # AI and web imports
 import requests
 from bs4 import BeautifulSoup
 
 # Database imports
-from models import db, DocumentModel, ProcessingJob
+from .extensions import db
+from .models import Document, ProcessingJob
 
 logger = logging.getLogger(__name__)
 
@@ -198,28 +199,65 @@ class DocumentProcessor:
         }
     
     def _extract_image_enhanced(self, file_path: str) -> Dict[str, Any]:
-        """Enhanced image OCR with metadata"""
+        """Enhanced image OCR with metadata and multilingual support"""
         try:
             image = Image.open(file_path)
-            text = pytesseract.image_to_string(image)
+            
+            # Try to detect language first
+            detected_lang = pytesseract.image_to_osd(image, output_type=pytesseract.Output.DICT)
+            lang_script = detected_lang.get('script', 'Latin')
+            
+            # Set language based on script detection
+            # Tesseract language codes: eng (English), hin (Hindi), san (Sanskrit), etc.
+            lang_codes = {
+                'Latin': 'eng',
+                'Arabic': 'ara',
+                'Chinese': 'chi_sim',
+                'Japanese': 'jpn',
+                'Korean': 'kor',
+                'Devanagari': 'hin',
+                'Armenian': 'arm',
+                'Bengali': 'ben',
+                'Cyrillic': 'rus',
+                'Ethiopic': 'amh',
+                'Greek': 'ell',
+                'Gujarati': 'guj',
+                'Gurmukhi': 'pan',
+                'Kannada': 'kan',
+                'Malayalam': 'mal',
+                'Myanmar': 'mya',
+                'Oriya': 'ori',
+                'Sinhala': 'sin',
+                'Tamil': 'tam',
+                'Telugu': 'tel',
+                'Thai': 'tha'
+            }
+            
+            # Default to English if script not in mapping
+            detected_language = lang_codes.get(lang_script, 'eng')
+            
+            # Perform OCR with detected language
+            text = pytesseract.image_to_string(image, lang=detected_language)
             
             metadata = {
                 'format': image.format,
                 'mode': image.mode,
                 'size': image.size,
                 'width': image.width,
-                'height': image.height
+                'height': image.height,
+                'detected_script': lang_script,
+                'ocr_language': detected_language
             }
             
             # Get OCR confidence data
-            ocr_data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+            ocr_data = pytesseract.image_to_data(image, lang=detected_language, output_type=pytesseract.Output.DICT)
             confidence_scores = [int(conf) for conf in ocr_data['conf'] if int(conf) > 0]
             avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
             
             structure = {
                 'ocr_confidence': avg_confidence,
                 'word_count': len([word for word in ocr_data['text'] if word.strip()]),
-                'detected_languages': 'eng'  # Default, could be enhanced
+                'detected_languages': detected_language
             }
             
             return {
@@ -231,30 +269,77 @@ class DocumentProcessor:
             }
             
         except Exception as e:
-            return {
-                'text': '',
-                'metadata': {},
-                'structure': {},
-                'success': False,
-                'error': str(e)
-            }
+            # Fallback to English if language detection fails
+            try:
+                image = Image.open(file_path)
+                text = pytesseract.image_to_string(image, lang='eng')
+                
+                metadata = {
+                    'format': image.format,
+                    'mode': image.mode,
+                    'size': image.size,
+                    'width': image.width,
+                    'height': image.height,
+                    'detected_script': 'Unknown',
+                    'ocr_language': 'eng',
+                    'fallback_used': True
+                }
+                
+                ocr_data = pytesseract.image_to_data(image, lang='eng', output_type=pytesseract.Output.DICT)
+                confidence_scores = [int(conf) for conf in ocr_data['conf'] if int(conf) > 0]
+                avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
+                
+                structure = {
+                    'ocr_confidence': avg_confidence,
+                    'word_count': len([word for word in ocr_data['text'] if word.strip()]),
+                    'detected_languages': 'eng'
+                }
+                
+                return {
+                    'text': text,
+                    'metadata': metadata,
+                    'structure': structure,
+                    'success': True,
+                    'error': None
+                }
+            except Exception as fallback_e:
+                return {
+                    'text': '',
+                    'metadata': {},
+                    'structure': {},
+                    'success': False,
+                    'error': f"Primary error: {str(e)}, Fallback error: {str(fallback_e)}"
+                }
     
     def ai_question_answer(self, document_text: str, question: str, context: Dict = None) -> Dict[str, Any]:
-        """AI-powered Q&A on document content"""
+        """AI-powered Q&A on document content with enhanced accuracy"""
         try:
-            # Prepare the prompt
-            system_prompt = """You are an AI assistant specialized in analyzing and answering questions about document content. 
-            Provide accurate, helpful, and contextual answers based on the document provided. 
-            If the answer cannot be found in the document, clearly state that."""
+            # Enhanced system prompt for better accuracy
+            system_prompt = """You are an expert AI assistant specialized in analyzing and answering questions about document content with maximum accuracy.
             
-            user_prompt = f"""Document Content:
+INSTRUCTIONS:
+1. Carefully read the entire document content provided
+2. Focus ONLY on information present in the document
+3. If the answer is not clearly found in the document, respond with "I cannot find a clear answer to this question in the provided document."
+4. Provide specific quotes or references from the document when possible
+5. Structure your response clearly with:
+   - Direct answer to the question
+   - Supporting evidence from the document
+   - Confidence level (High/Medium/Low)"""
+            
+            # Enhanced user prompt with better context
+            user_prompt = f"""DOCUMENT CONTENT:
 {document_text[:8000]}  # Limit for API
 
-Question: {question}
+QUESTION: {question}
 
-Please provide a comprehensive answer based on the document content above."""
+Please provide a comprehensive, accurate answer based ONLY on the document content above.
+Format your response as:
+DIRECT ANSWER: [Your direct answer]
+EVIDENCE: [Relevant quotes or references from document]
+CONFIDENCE: [High/Medium/Low]"""
             
-            # Call Gemini API
+            # Call Gemini API with enhanced parameters for better accuracy
             headers = {
                 'Content-Type': 'application/json',
             }
@@ -264,28 +349,52 @@ Please provide a comprehensive answer based on the document content above."""
                     "parts": [{
                         "text": f"{system_prompt}\n\n{user_prompt}"
                     }]
-                }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.3,  # Lower temperature for more focused responses
+                    "maxOutputTokens": 2048,
+                    "topK": 40,
+                    "topP": 0.95
+                },
+                "safetySettings": [
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_ONLY_HIGH"
+                    }
+                ]
             }
             
             response = requests.post(
                 f"{self.gemini_api_url}?key={self.gemini_api_key}",
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=45  # Increased timeout for better processing
             )
             
             if response.status_code == 200:
                 result = response.json()
-                answer = result['candidates'][0]['content']['parts'][0]['text']
                 
-                return {
-                    'success': True,
-                    'answer': answer,
-                    'question': question,
-                    'confidence': 'high',  # Could be enhanced with confidence scoring
-                    'sources': 'document_content',
-                    'timestamp': datetime.utcnow().isoformat()
-                }
+                # Check if response has content
+                if 'candidates' in result and len(result['candidates']) > 0:
+                    answer = result['candidates'][0]['content']['parts'][0]['text']
+                    
+                    # Calculate confidence based on response quality
+                    confidence = 'high' if len(answer) > 50 else 'medium'
+                    
+                    return {
+                        'success': True,
+                        'answer': answer,
+                        'question': question,
+                        'confidence': confidence,
+                        'sources': 'document_content',
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': 'No valid response generated from AI model',
+                        'question': question
+                    }
             else:
                 return {
                     'success': False,
@@ -302,18 +411,33 @@ Please provide a comprehensive answer based on the document content above."""
             }
     
     def smart_edit_content(self, document_text: str, edit_instruction: str) -> Dict[str, Any]:
-        """AI-powered smart editing (rephrase, summarize, change tone, etc.)"""
+        """AI-powered smart editing with enhanced accuracy and validation"""
         try:
-            system_prompt = """You are an expert content editor. You can rephrase, summarize, change tone, 
-            fix grammar, restructure, and perform various editing tasks on documents. 
-            Always maintain the core meaning while applying the requested changes."""
+            # Enhanced system prompt for better editing accuracy
+            system_prompt = """You are an expert content editor with specialized skills in various editing tasks.
             
-            user_prompt = f"""Original Content:
+INSTRUCTIONS:
+1. Carefully analyze the original content and edit instruction
+2. Apply ONLY the specific changes requested in the instruction
+3. Preserve the core meaning and factual accuracy of the content
+4. Maintain appropriate formatting and structure
+5. If the instruction is unclear, make reasonable assumptions but note them
+6. Structure your response with only the edited content, nothing else
+
+EDITING TYPES YOU CAN PERFORM:
+- Rephrasing: Improve clarity and flow while maintaining meaning
+- Tone adjustment: Formal, casual, professional, friendly, etc.
+- Grammar correction: Fix grammatical errors and improve readability
+- Summarization: Condense content while preserving key points
+- Restructuring: Reorganize for better logical flow
+- Expansion: Add relevant details to enhance understanding"""
+            
+            user_prompt = f"""ORIGINAL CONTENT:
 {document_text[:6000]}  # Limit for API
 
-Edit Instruction: {edit_instruction}
+EDIT INSTRUCTION: {edit_instruction}
 
-Please apply the requested editing changes and return the modified content."""
+Please apply the requested editing changes and return ONLY the modified content without any additional text or formatting."""
             
             headers = {
                 'Content-Type': 'application/json',
@@ -324,28 +448,53 @@ Please apply the requested editing changes and return the modified content."""
                     "parts": [{
                         "text": f"{system_prompt}\n\n{user_prompt}"
                     }]
-                }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.5,  # Balanced temperature for creative yet accurate editing
+                    "maxOutputTokens": 4096,
+                    "topK": 40,
+                    "topP": 0.95
+                },
+                "safetySettings": [
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_ONLY_HIGH"
+                    }
+                ]
             }
             
             response = requests.post(
                 f"{self.gemini_api_url}?key={self.gemini_api_key}",
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=45  # Increased timeout for better processing
             )
             
             if response.status_code == 200:
                 result = response.json()
-                edited_content = result['candidates'][0]['content']['parts'][0]['text']
                 
-                return {
-                    'success': True,
-                    'original_content': document_text,
-                    'edited_content': edited_content,
-                    'edit_instruction': edit_instruction,
-                    'changes_made': 'AI-powered editing applied',
-                    'timestamp': datetime.utcnow().isoformat()
-                }
+                # Check if response has content
+                if 'candidates' in result and len(result['candidates']) > 0:
+                    edited_content = result['candidates'][0]['content']['parts'][0]['text']
+                    
+                    # Validate that edited content is different from original
+                    is_changed = edited_content.strip() != document_text.strip()
+                    
+                    return {
+                        'success': True,
+                        'original_content': document_text,
+                        'edited_content': edited_content,
+                        'edit_instruction': edit_instruction,
+                        'changes_made': 'AI-powered editing applied' if is_changed else 'No significant changes made',
+                        'timestamp': datetime.utcnow().isoformat(),
+                        'content_changed': is_changed
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': 'No valid response generated from AI model',
+                        'edit_instruction': edit_instruction
+                    }
             else:
                 return {
                     'success': False,
@@ -391,37 +540,78 @@ Please apply the requested editing changes and return the modified content."""
             }
     
     def _convert_to_json(self, content: str, metadata: Dict = None) -> Dict[str, Any]:
-        """Convert content to structured JSON"""
-        # Parse content into structured format
-        lines = content.split('\n')
-        paragraphs = [line.strip() for line in lines if line.strip()]
-        
-        structured_data = {
-            'document_info': {
-                'total_characters': len(content),
-                'total_words': len(content.split()),
-                'total_paragraphs': len(paragraphs),
-                'extraction_timestamp': datetime.utcnow().isoformat()
-            },
-            'metadata': metadata or {},
-            'content': {
-                'full_text': content,
-                'paragraphs': paragraphs,
-                'summary': content[:500] + '...' if len(content) > 500 else content
+        """Convert content to structured JSON with enhanced organization"""
+        try:
+            # Parse content into structured format with better organization
+            lines = content.split('\n')
+            paragraphs = [line.strip() for line in lines if line.strip()]
+            
+            # Split content into sections if possible
+            sections = self._identify_sections(content)
+            
+            # Extract key information
+            key_info = self._extract_key_information(content)
+            
+            structured_data = {
+                'document_info': {
+                    'total_characters': len(content),
+                    'total_words': len(content.split()),
+                    'total_paragraphs': len(paragraphs),
+                    'total_sections': len(sections),
+                    'extraction_timestamp': datetime.utcnow().isoformat()
+                },
+                'metadata': metadata or {},
+                'content': {
+                    'full_text': content,
+                    'paragraphs': paragraphs,
+                    'sections': sections,
+                    'key_information': key_info
+                }
             }
-        }
-        
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-        json.dump(structured_data, temp_file, indent=2, ensure_ascii=False)
-        temp_file.close()
-        
-        return {
-            'success': True,
-            'file_path': temp_file.name,
-            'format': 'json',
-            'data': structured_data
-        }
+            
+            # Create temporary file
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+            json.dump(structured_data, temp_file, indent=2, ensure_ascii=False)
+            temp_file.close()
+            
+            return {
+                'success': True,
+                'file_path': temp_file.name,
+                'format': 'json',
+                'data': structured_data
+            }
+        except Exception as e:
+            logger.error(f"Error in JSON conversion: {str(e)}")
+            # Fallback to simple conversion
+            lines = content.split('\n')
+            paragraphs = [line.strip() for line in lines if line.strip()]
+            
+            structured_data = {
+                'document_info': {
+                    'total_characters': len(content),
+                    'total_words': len(content.split()),
+                    'total_paragraphs': len(paragraphs),
+                    'extraction_timestamp': datetime.utcnow().isoformat()
+                },
+                'metadata': metadata or {},
+                'content': {
+                    'full_text': content,
+                    'paragraphs': paragraphs,
+                    'summary': content[:500] + '...' if len(content) > 500 else content
+                }
+            }
+            
+            # Create temporary file
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+            json.dump(structured_data, temp_file, indent=2, ensure_ascii=False)
+            temp_file.close()
+            
+            return {
+                'success': True,
+                'file_path': temp_file.name,
+                'format': 'json',
+                'data': structured_data
+            }
     
     def _convert_to_pdf(self, content: str) -> Dict[str, Any]:
         """Convert content to PDF"""
@@ -485,8 +675,106 @@ Please apply the requested editing changes and return the modified content."""
         }
     
     def _convert_to_html(self, content: str) -> Dict[str, Any]:
-        """Convert content to HTML"""
-        html_content = f"""<!DOCTYPE html>
+        """Convert content to HTML with enhanced structure and styling"""
+        try:
+            # Identify sections in the content
+            sections = self._identify_sections(content)
+            
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>AI DocTransform - Converted Document</title>
+    <style>
+        body {{ 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            line-height: 1.6; 
+            margin: 40px auto; 
+            max-width: 800px; 
+            padding: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }}
+        header {{ 
+            text-align: center; 
+            padding: 20px 0; 
+            border-bottom: 2px solid #007bff; 
+            margin-bottom: 30px;
+        }}
+        h1 {{ color: #007bff; }}
+        h2 {{ color: #0056b3; margin-top: 30px; }}
+        h3 {{ color: #004085; }}
+        p {{ margin-bottom: 16px; text-align: justify; }}
+        .section {{ 
+            background: white; 
+            padding: 20px; 
+            margin: 20px 0; 
+            border-radius: 5px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        }}
+        .metadata {{ 
+            background: #e9ecef; 
+            padding: 15px; 
+            border-left: 4px solid #007bff; 
+            margin: 20px 0; 
+            font-size: 0.9em; 
+        }}
+        footer {{ 
+            text-align: center; 
+            margin-top: 40px; 
+            padding-top: 20px; 
+            border-top: 1px solid #ddd; 
+            color: #6c757d; 
+            font-size: 0.9em; 
+        }}
+    </style>
+</head>
+<body>
+    <header>
+        <h1>AI DocTransform - Converted Document</h1>
+        <p>Processed on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
+    </header>
+"""
+            
+            # Add sections if identified
+            if sections and len(sections) > 1:
+                for i, section in enumerate(sections):
+                    title = section.get('title', f'Section {i+1}')
+                    content = section.get('content', '')
+                    html_content += f"    <div class=\"section\">\n"
+                    html_content += f"        <h2>{title}</h2>\n"
+                    # Convert paragraphs within section
+                    paragraphs = content.split('\n\n')
+                    for para in paragraphs:
+                        if para.strip():
+                            html_content += f"        <p>{para.strip()}</p>\n"
+                    html_content += "    </div>\n"
+            else:
+                # Convert paragraphs to HTML
+                paragraphs = content.split('\n\n')
+                for para in paragraphs:
+                    if para.strip():
+                        html_content += f"    <p>{para.strip()}</p>\n"
+            
+            html_content += """    <footer>
+        <p>Document processed by AI DocTransform - Smart Document Converter & Query Assistant</p>
+    </footer>
+</body>
+</html>"""
+            
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
+            temp_file.write(html_content)
+            temp_file.close()
+            
+            return {
+                'success': True,
+                'file_path': temp_file.name,
+                'format': 'html'
+            }
+        except Exception as e:
+            logger.error(f"Error in HTML conversion: {str(e)}")
+            # Fallback to simple conversion
+            html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -498,25 +786,139 @@ Please apply the requested editing changes and return the modified content."""
 </head>
 <body>
 """
-        
-        # Convert paragraphs to HTML
-        paragraphs = content.split('\n\n')
-        for para in paragraphs:
-            if para.strip():
-                html_content += f"    <p>{para.strip()}</p>\n"
-        
-        html_content += """</body>
+            
+            # Convert paragraphs to HTML
+            paragraphs = content.split('\n\n')
+            for para in paragraphs:
+                if para.strip():
+                    html_content += f"    <p>{para.strip()}</p>\n"
+            
+            html_content += """</body>
 </html>"""
-        
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
-        temp_file.write(html_content)
-        temp_file.close()
-        
-        return {
-            'success': True,
-            'file_path': temp_file.name,
-            'format': 'html'
-        }
+            
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
+            temp_file.write(html_content)
+            temp_file.close()
+            
+            return {
+                'success': True,
+                'file_path': temp_file.name,
+                'format': 'html'
+            }
+    
+    def _identify_sections(self, content: str) -> list:
+        """Identify sections in document content based on headers and structure"""
+        try:
+            sections = []
+            lines = content.split('\n')
+            
+            # Common header patterns
+            header_patterns = [
+                r'^(#+)\s+(.+)',  # Markdown headers
+                r'^([A-Z][A-Z0-9\s]{2,}:)$',  # ALL CAPS headers
+                r'^([A-Z][a-z]+\s+[A-Z][a-z]+):$',  # Title Case headers
+                r'^(\d+\.\s+.+)$',  # Numbered sections
+                r'^([IVX]+\.\s+.+)$'  # Roman numeral sections
+            ]
+            
+            current_section = None
+            current_content = []
+            
+            for line in lines:
+                is_header = False
+                
+                # Check for headers
+                for pattern in header_patterns:
+                    if re.match(pattern, line.strip()):
+                        is_header = True
+                        break
+                
+                # If we found a header
+                if is_header:
+                    # Save previous section if it exists
+                    if current_section:
+                        sections.append({
+                            'title': current_section,
+                            'content': '\n'.join(current_content).strip()
+                        })
+                    
+                    # Start new section
+                    current_section = line.strip()
+                    current_content = []
+                else:
+                    # Add line to current section
+                    if current_section or len(current_content) > 0:
+                        current_content.append(line)
+            
+            # Add final section
+            if current_section:
+                sections.append({
+                    'title': current_section,
+                    'content': '\n'.join(current_content).strip()
+                })
+            
+            return sections
+        except Exception as e:
+            logger.error(f"Error identifying sections: {str(e)}")
+            return []
+    
+    def _extract_key_information(self, content: str) -> dict:
+        """Extract key information like dates, numbers, and important entities"""
+        try:
+            key_info = {
+                'dates': [],
+                'numbers': [],
+                'email_addresses': [],
+                'phone_numbers': [],
+                'important_entities': []
+            }
+            
+            # Extract dates (various formats)
+            date_patterns = [
+                r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',  # MM/DD/YYYY or MM-DD-YYYY
+                r'\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b',     # YYYY/MM/DD or YYYY-MM-DD
+                r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{2,4}\b'  # Month DD, YYYY
+            ]
+            
+            for pattern in date_patterns:
+                dates = re.findall(pattern, content, re.IGNORECASE)
+                key_info['dates'].extend(dates)
+            
+            # Extract numbers (excluding dates)
+            number_pattern = r'\b\d+(?:[,.]\d+)*\b'
+            numbers = re.findall(number_pattern, content)
+            # Filter out likely dates
+            for num in numbers:
+                if not re.match(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', num) and \
+                   not re.match(r'\d{4}[/-]\d{1,2}[/-]\d{1,2}', num):
+                    key_info['numbers'].append(num)
+            
+            # Extract email addresses
+            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            key_info['email_addresses'] = re.findall(email_pattern, content)
+            
+            # Extract phone numbers
+            phone_patterns = [
+                r'\b\d{3}-\d{3}-\d{4}\b',
+                r'\b\(\d{3}\)\s*\d{3}-\d{4}\b',
+                r'\b\d{3}\.\d{3}\.\d{4}\b'
+            ]
+            
+            for pattern in phone_patterns:
+                phones = re.findall(pattern, content)
+                key_info['phone_numbers'].extend(phones)
+            
+            # Extract potential important entities (capitalized phrases)
+            entity_pattern = r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}\b'
+            entities = re.findall(entity_pattern, content)
+            # Filter common words
+            common_words = {'The', 'And', 'For', 'With', 'From', 'This', 'That', 'Have', 'Were', 'Where', 'When', 'What', 'Who', 'Why', 'How'}
+            key_info['important_entities'] = [e for e in entities if e.split()[0] not in common_words]
+            
+            return key_info
+        except Exception as e:
+            logger.error(f"Error extracting key information: {str(e)}")
+            return {}
     
     def _convert_to_txt(self, content: str) -> Dict[str, Any]:
         """Convert content to plain text"""
@@ -531,24 +933,42 @@ Please apply the requested editing changes and return the modified content."""
         }
     
     def generate_summary(self, content: str, summary_type: str = 'brief') -> Dict[str, Any]:
-        """Generate AI-powered summary of document content"""
+        """Generate AI-powered summary of document content with enhanced accuracy"""
         try:
+            # Enhanced instructions based on summary type
             if summary_type == 'brief':
-                instruction = "Provide a brief summary (2-3 sentences) of the main points."
+                instruction = "Provide a concise summary (2-3 sentences) capturing ONLY the main points."
+                format_instruction = "Format as continuous text."
             elif summary_type == 'detailed':
-                instruction = "Provide a detailed summary covering all major points and key details."
+                instruction = "Provide a comprehensive summary covering all major points, key details, and important facts."
+                format_instruction = "Format as continuous text with clear paragraph structure."
             elif summary_type == 'bullet':
-                instruction = "Provide a bullet-point summary of the key points."
+                instruction = "Provide a structured bullet-point summary of the key points and main ideas."
+                format_instruction = "Format as a clear bullet list with 5-10 key points."
+            elif summary_type == 'executive':
+                instruction = "Provide an executive summary highlighting critical insights, conclusions, and recommendations."
+                format_instruction = "Format as 3-5 concise paragraphs focusing on key takeaways."
             else:
-                instruction = "Provide a comprehensive summary of the content."
+                instruction = "Provide a comprehensive summary covering all major points, key details, and important facts."
+                format_instruction = "Format as continuous text with clear paragraph structure."
             
-            system_prompt = f"""You are an expert at summarizing documents. {instruction}
-            Focus on the most important information and maintain accuracy."""
+            # Enhanced system prompt for better summarization accuracy
+            system_prompt = f"""You are an expert document summarization specialist with exceptional analytical skills.
             
-            user_prompt = f"""Content to summarize:
+INSTRUCTIONS:
+1. {instruction}
+2. Extract ONLY information present in the original document
+3. Maintain factual accuracy and avoid adding assumptions
+4. {format_instruction}
+5. Preserve key numbers, dates, and specific facts
+6. Eliminate redundant information while maintaining completeness"""
+            
+            user_prompt = f"""DOCUMENT CONTENT TO SUMMARIZE:
 {content[:7000]}  # Limit for API
 
-Please provide the requested summary."""
+SUMMARY TYPE: {summary_type}
+
+Please provide the requested summary following the format instructions above."""
             
             headers = {
                 'Content-Type': 'application/json',
@@ -559,29 +979,64 @@ Please provide the requested summary."""
                     "parts": [{
                         "text": f"{system_prompt}\n\n{user_prompt}"
                     }]
-                }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.3,  # Lower temperature for more factual summaries
+                    "maxOutputTokens": 2048,
+                    "topK": 40,
+                    "topP": 0.95
+                },
+                "safetySettings": [
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_ONLY_HIGH"
+                    }
+                ]
             }
             
             response = requests.post(
                 f"{self.gemini_api_url}?key={self.gemini_api_key}",
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=45  # Increased timeout for better processing
             )
             
             if response.status_code == 200:
                 result = response.json()
-                summary = result['candidates'][0]['content']['parts'][0]['text']
                 
-                return {
-                    'success': True,
-                    'summary': summary,
-                    'summary_type': summary_type,
-                    'original_length': len(content),
-                    'summary_length': len(summary),
-                    'compression_ratio': len(summary) / len(content) if content else 0,
-                    'timestamp': datetime.utcnow().isoformat()
-                }
+                # Check if response has content
+                if 'candidates' in result and len(result['candidates']) > 0:
+                    summary = result['candidates'][0]['content']['parts'][0]['text']
+                    
+                    # Calculate quality metrics
+                    original_length = len(content)
+                    summary_length = len(summary)
+                    compression_ratio = summary_length / original_length if original_length > 0 else 0
+                    
+                    # Determine quality based on compression ratio
+                    if summary_type == 'brief':
+                        quality = 'high' if 0.05 <= compression_ratio <= 0.2 else 'medium'
+                    elif summary_type == 'detailed':
+                        quality = 'high' if 0.15 <= compression_ratio <= 0.4 else 'medium'
+                    else:
+                        quality = 'high' if 0.1 <= compression_ratio <= 0.3 else 'medium'
+                    
+                    return {
+                        'success': True,
+                        'summary': summary,
+                        'summary_type': summary_type,
+                        'original_length': original_length,
+                        'summary_length': summary_length,
+                        'compression_ratio': compression_ratio,
+                        'quality': quality,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': 'No valid response generated from AI model',
+                        'summary_type': summary_type
+                    }
             else:
                 return {
                     'success': False,
@@ -596,3 +1051,26 @@ Please provide the requested summary."""
                 'error': str(e),
                 'summary_type': summary_type
             }
+    
+    def answer_question(self, document_text: str, question: str, document_id: int = None, user_id: int = None) -> tuple[str, str]:
+        """Answer a question about a document (wrapper for ai_question_answer)"""
+        try:
+            result = self.ai_question_answer(document_text, question)
+            if result['success']:
+                # Save processing job
+                job = ProcessingJob(
+                    job_type='qa',
+                    input_text=question,
+                    output_text=result['answer'],
+                    document_id=document_id,
+                    user_id=user_id,
+                    status='completed'
+                )
+                db.session.add(job)
+                db.session.commit()
+                return result['answer'], job.uuid
+            else:
+                return result.get('error', 'Failed to answer question'), None
+        except Exception as e:
+            logger.error(f"Error in answer_question: {str(e)}")
+            return str(e), None

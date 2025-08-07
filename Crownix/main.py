@@ -481,3 +481,12 @@ def document_summary():
     except Exception as e:
         logger.error(f"Summary Error: {e}")
         return jsonify({'error': 'An error occurred during summary generation.'}), 500
+
+@main.route('/health')
+def health_check():
+    """Health check endpoint for deployment monitoring"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'ai-doctransform',
+        'version': '1.0.0'
+    }), 200

@@ -22,10 +22,10 @@
                 <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
                     {% if session['user_id'] %}
                         <li class="nav-item"><span class="nav-link">Welcome, {{ session['username'] }}</span></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Logout</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('main.logout') }}">Logout</a></li>
                     {% else %}
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Login</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('signup') }}">Sign Up</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('main.login') }}">Login</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('main.signup') }}">Sign Up</a></li>
                     {% endif %}
                 </ul>
             </div>

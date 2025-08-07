@@ -23,10 +23,10 @@
                 <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
                     {% if session['user_id'] %}
                         <li class="nav-item"><span class="nav-link">Welcome, {{ session['username'] }}</span></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('main.logout') }}">Logout</a></li>
+                        <li class="nav-item"><a class="nav-link" href="#" onclick="logout()">Logout</a></li>
                     {% else %}
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('main.login') }}">Login</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('main.signup') }}">Sign Up</a></li>
+                        <li class="nav-item"><a class="nav-link" href="#" onclick="showLogin()">Login</a></li>
+                        <li class="nav-item"><a class="nav-link" href="#" onclick="showSignup()">Sign Up</a></li>
                     {% endif %}
                 </ul>
             </div>
@@ -123,6 +123,33 @@
                         </div>
                         <div class="card-body" id="aiResponse"></div>
                     </div>
+
+                    <!-- Chat Section -->
+                    <div class="card" id="chatSection" style="display: none;">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0">💬 Chat with AI about your document</h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Chat Messages -->
+                            <div id="chatMessages" style="height: 300px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 5px; padding: 15px; margin-bottom: 15px; background-color: #f8f9fa;">
+                                <div class="text-muted text-center">Start a conversation about your document...</div>
+                            </div>
+                            
+                            <!-- Chat Input -->
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="chatInput" placeholder="Ask questions about your document..." onkeypress="handleChatKeyPress(event)">
+                                <button class="btn btn-primary" onclick="sendChatMessage()" id="chatSendBtn">
+                                    <i class="fas fa-paper-plane"></i> Send
+                                </button>
+                            </div>
+                            
+                            <!-- Chat Loading -->
+                            <div class="mt-2" id="chatLoading" style="display: none;">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span class="ms-2 text-muted">AI is thinking...</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -163,6 +190,8 @@
                     document.getElementById('extractedText').value = data.extraction_result.text;
                     document.getElementById('extractedTextSection').style.display = 'block';
                     document.getElementById('querySection').style.display = 'block';
+                    document.getElementById('chatSection').style.display = 'block';
+                    initializeChat();
                 } else {
                     alert('Upload failed: ' + data.error);
                 }
@@ -296,6 +325,153 @@
         document.getElementById('actionType').addEventListener('change', function() {
             document.getElementById('convertOptions').style.display = this.value === 'convert' ? '' : 'none';
         });
+
+        // Chat functionality
+        function initializeChat() {
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML = `
+                <div class="alert alert-info mb-2">
+                    <strong>Welcome!</strong> I'm your AI assistant. Ask me anything about your document: "${currentFileInfo.filename}"
+                </div>
+            `;
+        }
+
+        function handleChatKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendChatMessage();
+            }
+        }
+
+        async function sendChatMessage() {
+            const chatInput = document.getElementById('chatInput');
+            const message = chatInput.value.trim();
+            
+            if (!message || !currentFileInfo) {
+                return;
+            }
+
+            // Add user message to chat
+            addChatMessage('user', message);
+            chatInput.value = '';
+            
+            // Show loading
+            document.getElementById('chatLoading').style.display = 'block';
+            document.getElementById('chatSendBtn').disabled = true;
+
+            try {
+                const response = await fetch('/api/document/qa', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        document_uuid: currentFileInfo.document_uuid,
+                        question: message
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.answer) {
+                    addChatMessage('ai', data.answer, data.confidence);
+                } else {
+                    addChatMessage('ai', 'Sorry, I couldn\'t process your question. Please try again.', 0);
+                }
+            } catch (error) {
+                addChatMessage('ai', 'Sorry, there was an error processing your request.', 0);
+            } finally {
+                document.getElementById('chatLoading').style.display = 'none';
+                document.getElementById('chatSendBtn').disabled = false;
+            }
+        }
+
+        function addChatMessage(type, message, confidence = null) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `mb-3 ${type === 'user' ? 'text-end' : 'text-start'}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            const confidenceText = confidence ? ` (Confidence: ${Math.round(confidence * 100)}%)` : '';
+            
+            messageDiv.innerHTML = `
+                <div class="d-inline-block p-2 rounded ${type === 'user' ? 'bg-primary text-white' : 'bg-light border'} " style="max-width: 80%;">
+                    <div class="fw-bold mb-1">${type === 'user' ? 'You' : 'AI Assistant'}${confidenceText}</div>
+                    <div>${message}</div>
+                    <small class="text-muted d-block mt-1">${timestamp}</small>
+                </div>
+            `;
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Authentication functions
+        async function showLogin() {
+            const email = prompt('Enter your email:');
+            const password = prompt('Enter your password:');
+            
+            if (email && password) {
+                try {
+                    const response = await fetch('/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        alert('Login successful!');
+                        location.reload();
+                    } else {
+                        alert('Login failed: ' + data.error);
+                    }
+                } catch (error) {
+                    alert('Login error: ' + error.message);
+                }
+            }
+        }
+
+        async function showSignup() {
+            const username = prompt('Enter your username:');
+            const email = prompt('Enter your email:');
+            const password = prompt('Enter your password:');
+            
+            if (username && email && password) {
+                try {
+                    const response = await fetch('/signup', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, email, password })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        alert('Signup successful!');
+                        location.reload();
+                    } else {
+                        alert('Signup failed: ' + data.error);
+                    }
+                } catch (error) {
+                    alert('Signup error: ' + error.message);
+                }
+            }
+        }
+
+        async function logout() {
+            try {
+                const response = await fetch('/logout');
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('Logged out successfully!');
+                    location.reload();
+                } else {
+                    alert('Logout failed.');
+                }
+            } catch (error) {
+                alert('Logout error: ' + error.message);
+            }
+        }
     </script>
 </body>
 </html>

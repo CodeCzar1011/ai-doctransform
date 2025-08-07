@@ -10,6 +10,7 @@ import logging
 from .extensions import db, bcrypt
 from .models import User, Document, ChatMessage
 from .document_processor import DocumentProcessor
+from functools import wraps
 
 main = Blueprint('main', __name__)
 
@@ -18,6 +19,15 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 doc_processor = DocumentProcessor(GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff'}
+
+# Custom decorator for API endpoints that need authentication
+def api_login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({'error': 'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +77,7 @@ def logout():
 
 # --- DOCUMENT & FILE ROUTES ---
 @main.route('/upload', methods=['POST'])
-@login_required
+@api_login_required
 def upload_file():
     """Handle file upload and text extraction"""
     try:
@@ -131,14 +141,14 @@ def upload_file():
         return jsonify({'error': 'An unexpected error occurred during upload.'}), 500
 
 @main.route('/download/<filename>')
-@login_required
+@api_login_required
 def download_file(filename):
     """Download processed files"""
     return send_from_directory('uploads', filename, as_attachment=True)
 
 # --- AI & DOCUMENT PROCESSING API ---
 @main.route('/api/document/qa', methods=['POST'])
-@login_required
+@api_login_required
 def document_qa():
     """AI-powered Q&A on document content"""
     try:
@@ -188,7 +198,7 @@ def document_qa():
 
 # --- CHAT HISTORY API ---
 @main.route('/api/document/<string:document_uuid>/chat', methods=['GET'])
-@login_required
+@api_login_required
 def get_chat_history(document_uuid):
     document = Document.query.filter_by(uuid=document_uuid, user_id=current_user.id).first()
     if not document:
@@ -197,7 +207,7 @@ def get_chat_history(document_uuid):
     return jsonify({'success': True, 'messages': [m.to_dict() for m in messages]})
 
 @main.route('/api/document/<string:document_uuid>/chat', methods=['POST'])
-@login_required
+@api_login_required
 def post_chat_message(document_uuid):
     data = request.get_json()
     document = Document.query.filter_by(uuid=document_uuid, user_id=current_user.id).first()
@@ -216,7 +226,7 @@ def post_chat_message(document_uuid):
 
 # --- ENHANCED DOCUMENT PROCESSING API ---
 @main.route('/api/document/enhanced-extract', methods=['POST'])
-@login_required
+@api_login_required
 def enhanced_extract():
     """Enhanced document extraction with metadata"""
     try:
@@ -289,7 +299,7 @@ def enhanced_extract():
         return jsonify({'error': 'An unexpected error occurred during extraction.'}), 500
 
 @main.route('/api/document/smart-edit', methods=['POST'])
-@login_required
+@api_login_required
 def smart_edit():
     """AI-powered smart editing of document content"""
     try:
@@ -354,7 +364,7 @@ def smart_edit():
         return jsonify({'error': 'An error occurred during smart editing.'}), 500
 
 @main.route('/api/document/convert', methods=['POST'])
-@login_required
+@api_login_required
 def convert_document():
     """Convert document to different formats"""
     try:
@@ -420,7 +430,7 @@ def convert_document():
         return jsonify({'error': 'An error occurred during document conversion.'}), 500
 
 @main.route('/api/document/summary', methods=['POST'])
-@login_required
+@api_login_required
 def document_summary():
     """Generate AI-powered summary of document content"""
     try:

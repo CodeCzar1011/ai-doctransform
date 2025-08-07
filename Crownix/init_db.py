@@ -46,7 +46,11 @@ def create_app():
     
     # Import models to register them
     with app.app_context():
-        from models import User, Document, ProcessingJob, APIUsage
+        try:
+            from models import User, Document, ProcessingJob, APIUsage
+        except ImportError:
+            # Try relative import if absolute import fails
+            from .models import User, Document, ProcessingJob, APIUsage
     
     return app, db
 

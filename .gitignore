@@ -72,4 +72,22 @@ logs/
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# Database files
+*.db
+
+# Render files
+render.yaml
+
+# Runtime files
+runtime.txt
+
+# Procfile
+Procfile
+
+# Error logs
+error_log.txt
+
+# Pip config
+pip.conf

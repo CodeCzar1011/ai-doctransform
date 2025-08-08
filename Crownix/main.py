@@ -42,6 +42,55 @@ def index():
     return render_template('index.html')
 
 # --- AUTHENTICATION ROUTES ---
+
+# --- HACKRX WEBHOOK ---
+@main.route('/api/v1/hackrx/run', methods=['POST'])
+def hackrx_webhook():
+    """Handle HackRx test submissions"""
+    try:
+        data = request.get_json()
+        
+        # Log the incoming request
+        logger.info(f"HackRx webhook received: {data}")
+        
+        # Extract test parameters
+        test_id = data.get('test_id')
+        document_text = data.get('document_text')
+        query = data.get('query')
+        
+        if not all([test_id, document_text, query]):
+            return jsonify({
+                'success': False,
+                'error': 'Missing required parameters: test_id, document_text, or query'
+            }), 400
+        
+        # Process the document using our AI
+        if not doc_processor:
+            return jsonify({
+                'success': False,
+                'error': 'Document processor not initialized'
+            }), 503
+        
+        # Get AI response
+        answer, _ = doc_processor.answer_question(
+            document_text=document_text,
+            question=query,
+            document_id=None,  # No document ID for webhook
+            user_id=None  # No user ID for webhook
+        )
+        
+        return jsonify({
+            'success': True,
+            'test_id': test_id,
+            'response': answer,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"HackRx webhook error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 @main.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:

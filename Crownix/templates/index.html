@@ -172,8 +172,12 @@
             formData.append('file', file);
 
             try {
+                const token = localStorage.getItem('auth_token');
                 const response = await fetch('/api/document/enhanced-extract', {
                     method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
                     body: formData
                 });
                 const data = await response.json();
@@ -459,7 +463,13 @@
 
         async function logout() {
             try {
-                const response = await fetch('/logout');
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
                 const data = await response.json();
                 
                 if (data.success) {

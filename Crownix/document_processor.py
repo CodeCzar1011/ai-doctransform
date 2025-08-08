@@ -312,202 +312,339 @@ class DocumentProcessor:
                 }
     
     def ai_question_answer(self, document_text: str, question: str, context: Dict = None) -> Dict[str, Any]:
-        """AI-powered Q&A on document content with enhanced accuracy"""
+        """Advanced AI-powered Q&A with document analysis and reasoning
+        
+        Args:
+            document_text: The full text content of the document
+            question: The question to answer about the document
+            context: Additional context (e.g., document metadata, user info)
+            
+        Returns:
+            Dict containing the answer and metadata
+        """
         try:
-            # Enhanced system prompt for better accuracy
-            system_prompt = """You are an expert AI assistant specialized in analyzing and answering questions about document content with maximum accuracy.
+            # Enhanced system prompt with reasoning capabilities
+            system_prompt = """You are an expert AI assistant specialized in analyzing and answering questions 
+            about document content with maximum accuracy and detail.
             
 INSTRUCTIONS:
-1. Carefully read the entire document content provided
-2. Focus ONLY on information present in the document
-3. If the answer is not clearly found in the document, respond with "I cannot find a clear answer to this question in the provided document."
-4. Provide specific quotes or references from the document when possible
-5. Structure your response clearly with:
-   - Direct answer to the question
-   - Supporting evidence from the document
-   - Confidence level (High/Medium/Low)"""
+1. Carefully analyze the entire document content provided
+2. For factual questions, provide direct quotes from the text when possible
+3. For analytical questions, provide well-reasoned answers based on the content
+4. If the answer isn't in the document, clearly state this
+5. For complex questions, break down your answer into logical sections
+6. Include relevant statistics, dates, or figures when available
+7. Maintain a professional and objective tone
+8. If multiple interpretations are possible, present them with their likelihood
+
+OUTPUT FORMAT (JSON):
+{
+    "answer": "Your detailed, well-structured answer",
+    "confidence": 0.0-1.0,
+    "sources": ["Relevant document sections or quotes"],
+    "key_points": ["Main supporting points from the document"],
+    "needs_clarification": true/false,
+    "suggested_follow_ups": ["Related questions that might be helpful"]
+}"""
             
-            # Enhanced user prompt with better context
-            user_prompt = f"""DOCUMENT CONTENT:
-{document_text[:8000]}  # Limit for API
+            # Build the prompt with document and question
+            prompt = f"""DOCUMENT CONTENT:
+{document_text}
 
 QUESTION: {question}
 
-Please provide a comprehensive, accurate answer based ONLY on the document content above.
-Format your response as:
-DIRECT ANSWER: [Your direct answer]
-EVIDENCE: [Relevant quotes or references from document]
-CONFIDENCE: [High/Medium/Low]"""
+Please analyze the document and provide a comprehensive answer to the question. 
+If the information is not present in the document, clearly state this.
+
+Your response should be in the specified JSON format."""
             
-            # Call Gemini API with enhanced parameters for better accuracy
-            headers = {
-                'Content-Type': 'application/json',
-            }
+            # Add context if available
+            if context:
+                prompt += f"\n\nADDITIONAL CONTEXT:\n{json.dumps(context, indent=2)}"
             
-            data = {
-                "contents": [{
-                    "parts": [{
-                        "text": f"{system_prompt}\n\n{user_prompt}"
-                    }]
-                }],
-                "generationConfig": {
-                    "temperature": 0.3,  # Lower temperature for more focused responses
-                    "maxOutputTokens": 2048,
-                    "topK": 40,
-                    "topP": 0.95
-                },
-                "safetySettings": [
-                    {
-                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                        "threshold": "BLOCK_ONLY_HIGH"
-                    }
-                ]
-            }
-            
+            # Call the AI model with enhanced parameters
             response = requests.post(
                 f"{self.gemini_api_url}?key={self.gemini_api_key}",
-                headers=headers,
-                json=data,
-                timeout=45  # Increased timeout for better processing
+                json={
+                    "contents": [{
+                        "parts": [
+                            {"text": system_prompt},
+                            {"text": prompt}
+                        ]
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.2,  # Lower temperature for more focused answers
+                        "topP": 0.9,
+                        "topK": 40,
+                        "maxOutputTokens": 4096,  # Increased for more detailed answers
+                    },
+                    "safetySettings": [
+                        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+                    ]
+                },
+                timeout=45  # Increased timeout for complex documents
             )
             
             if response.status_code == 200:
                 result = response.json()
-                
-                # Check if response has content
-                if 'candidates' in result and len(result['candidates']) > 0:
-                    answer = result['candidates'][0]['content']['parts'][0]['text']
-                    
-                    # Calculate confidence based on response quality
-                    confidence = 'high' if len(answer) > 50 else 'medium'
-                    
-                    return {
-                        'success': True,
-                        'answer': answer,
-                        'question': question,
-                        'confidence': confidence,
-                        'sources': 'document_content',
-                        'timestamp': datetime.utcnow().isoformat()
-                    }
-                else:
-                    return {
-                        'success': False,
-                        'error': 'No valid response generated from AI model',
-                        'question': question
-                    }
-            else:
-                return {
-                    'success': False,
-                    'error': f"API Error: {response.status_code} - {response.text}",
-                    'question': question
-                }
-                
-        except Exception as e:
-            logger.error(f"Error in AI Q&A: {str(e)}")
+                if 'candidates' in result and result['candidates']:
+                    try:
+                        # Extract and clean the response
+                        response_text = result['candidates'][0]['content']['parts'][0]['text']
+                        response_text = re.sub(r'```json\n|```', '', response_text).strip()
+                        
+                        # Parse the JSON response
+                        answer_data = json.loads(response_text)
+                        
+                        # Validate and enhance the response
+                        if 'answer' not in answer_data:
+                            raise ValueError("Invalid response format: missing 'answer' field")
+                            
+                        # Ensure required fields exist with defaults
+                        answer_data.setdefault('confidence', 0.8)
+                        answer_data.setdefault('sources', ['Full document'])
+                        answer_data.setdefault('key_points', [])
+                        answer_data.setdefault('needs_clarification', False)
+                        answer_data.setdefault('suggested_follow_ups', [])
+                        
+                        # Add success flag
+                        answer_data['success'] = True
+                        
+                        return answer_data
+                        
+                    except (json.JSONDecodeError, KeyError, ValueError) as e:
+                        logger.error(f"Failed to parse AI response: {str(e)}")
+                        # Fallback to a structured error response
+                        return {
+                            'success': True,
+                            'answer': f"I found this information in the document:\n\n{response_text}",
+                            'confidence': 0.6,
+                            'sources': ['Full document'],
+                            'key_points': [],
+                            'needs_clarification': True,
+                            'suggested_follow_ups': [
+                                "Could you clarify your question?",
+                                "Would you like me to look for specific information?"
+                            ]
+                        }
+            
+            # Handle API errors
+            error_msg = f"API Error: {response.status_code}"
+            if response.text:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get('error', {}).get('message', str(error_data))
+                except:
+                    error_msg = response.text[:500]  # Truncate long error messages
+            
+            logger.error(f"AI Q&A API error: {error_msg}")
             return {
                 'success': False,
-                'error': str(e),
-                'question': question
+                'error': f"Failed to get AI response: {error_msg}",
+                'question': question,
+                'suggested_actions': [
+                    "Try rephrasing your question",
+                    "Check if the document contains the relevant information",
+                    "Try a more specific or different question"
+                ]
+            }
+                
+        except Exception as e:
+            logger.error(f"Error in AI Q&A: {str(e)}", exc_info=True)
+            return {
+                'success': False,
+                'error': f"An unexpected error occurred: {str(e)}",
+                'question': question,
+                'suggested_actions': [
+                    "Please try again later",
+                    "Contact support if the issue persists"
+                ]
             }
     
-    def smart_edit_content(self, document_text: str, edit_instruction: str) -> Dict[str, Any]:
-        """AI-powered smart editing with enhanced accuracy and validation"""
-        try:
-            # Enhanced system prompt for better editing accuracy
-            system_prompt = """You are an expert content editor with specialized skills in various editing tasks.
+    def smart_edit_content(self, document_text: str, edit_instruction: str, 
+                          document_metadata: Dict = None) -> Dict[str, Any]:
+        """AI-powered smart editing with document structure awareness and change tracking
+        
+        Args:
+            document_text: The original text content to be edited
+            edit_instruction: User's instruction for the edit
+            document_metadata: Optional metadata about the document (type, structure, etc.)
             
-INSTRUCTIONS:
+        Returns:
+            Dict containing the edit results or error information
+            {
+                'success': bool,
+                'edited_content': str,
+                'changes_made': List[Dict],
+                'confidence': float,
+                'notes': str,
+                'needs_review': bool,
+                'suggested_next_steps': List[str],
+                'error': Optional[str]
+            }
+        """
+        try:
+            # Enhanced system prompt with document awareness
+            system_prompt = """You are an expert content editor with deep expertise in document processing.
+            
+DOCUMENT EDITING INSTRUCTIONS:
 1. Carefully analyze the original content and edit instruction
 2. Apply ONLY the specific changes requested in the instruction
-3. Preserve the core meaning and factual accuracy of the content
-4. Maintain appropriate formatting and structure
-5. If the instruction is unclear, make reasonable assumptions but note them
-6. Structure your response with only the edited content, nothing else
+3. Preserve the core meaning, factual accuracy, and document structure
+4. Maintain consistent formatting and style throughout the document
+5. For legal/formal documents, preserve precise language and formatting
+6. For creative content, enhance style while maintaining the original voice
+7. Clearly document all changes made
+8. If the instruction is unclear or cannot be safely applied, explain why
 
-EDITING TYPES YOU CAN PERFORM:
-- Rephrasing: Improve clarity and flow while maintaining meaning
-- Tone adjustment: Formal, casual, professional, friendly, etc.
-- Grammar correction: Fix grammatical errors and improve readability
-- Summarization: Condense content while preserving key points
-- Restructuring: Reorganize for better logical flow
-- Expansion: Add relevant details to enhance understanding"""
-            
-            user_prompt = f"""ORIGINAL CONTENT:
-{document_text[:6000]}  # Limit for API
+OUTPUT FORMAT (JSON):
+{
+    "edited_content": "The complete edited document content",
+    "changes_made": [
+        {
+            "type": "addition|deletion|modification|formatting",
+            "location": "Section/paragraph reference",
+            "description": "Description of the change",
+            "before": "Original text (for modifications/deletions)",
+            "after": "New text (for modifications/additions)"
+        }
+    ],
+    "confidence": 0.0-1.0,
+    "notes": "Any additional context or explanations",
+    "needs_review": true/false,
+    "suggested_next_steps": ["Suggestions for further improvements"]
+}"""
 
-EDIT INSTRUCTION: {edit_instruction}
-
-Please apply the requested editing changes and return ONLY the modified content without any additional text or formatting."""
+            # Build the prompt with document context and edit instruction
+            prompt_parts = [
+                "DOCUMENT TO EDIT:",
+                document_text[:12000],  # Limit size to avoid token limits
+                "\nEDIT INSTRUCTION:",
+                edit_instruction
+            ]
             
-            headers = {
-                'Content-Type': 'application/json',
-            }
+            # Add document metadata if available
+            if document_metadata:
+                prompt_parts.extend([
+                    "\nDOCUMENT METADATA:",
+                    json.dumps(document_metadata, indent=2)
+                ])
             
-            data = {
-                "contents": [{
-                    "parts": [{
-                        "text": f"{system_prompt}\n\n{user_prompt}"
-                    }]
-                }],
-                "generationConfig": {
-                    "temperature": 0.5,  # Balanced temperature for creative yet accurate editing
-                    "maxOutputTokens": 4096,
-                    "topK": 40,
-                    "topP": 0.95
-                },
-                "safetySettings": [
-                    {
-                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                        "threshold": "BLOCK_ONLY_HIGH"
-                    }
-                ]
-            }
+            prompt = "\n".join(prompt_parts)
             
+            # Call the AI model with enhanced parameters
             response = requests.post(
                 f"{self.gemini_api_url}?key={self.gemini_api_key}",
-                headers=headers,
-                json=data,
-                timeout=45  # Increased timeout for better processing
+                json={
+                    "contents": [{
+                        "parts": [
+                            {"text": system_prompt},
+                            {"text": prompt}
+                        ]
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.3,  # Lower temperature for more precise edits
+                        "topP": 0.9,
+                        "topK": 40,
+                        "maxOutputTokens": 4096,
+                    },
+                    "safetySettings": [
+                        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+                    ]
+                },
+                timeout=60  # Increased timeout for complex edits
             )
             
             if response.status_code == 200:
                 result = response.json()
-                
-                # Check if response has content
-                if 'candidates' in result and len(result['candidates']) > 0:
-                    edited_content = result['candidates'][0]['content']['parts'][0]['text']
-                    
-                    # Validate that edited content is different from original
-                    is_changed = edited_content.strip() != document_text.strip()
-                    
-                    return {
-                        'success': True,
-                        'original_content': document_text,
-                        'edited_content': edited_content,
-                        'edit_instruction': edit_instruction,
-                        'changes_made': 'AI-powered editing applied' if is_changed else 'No significant changes made',
-                        'timestamp': datetime.utcnow().isoformat(),
-                        'content_changed': is_changed
-                    }
-                else:
-                    return {
-                        'success': False,
-                        'error': 'No valid response generated from AI model',
-                        'edit_instruction': edit_instruction
-                    }
-            else:
-                return {
-                    'success': False,
-                    'error': f"API Error: {response.status_code} - {response.text}",
-                    'edit_instruction': edit_instruction
-                }
-                
-        except Exception as e:
-            logger.error(f"Error in smart editing: {str(e)}")
+                if 'candidates' in result and result['candidates']:
+                    try:
+                        # Extract and clean the response
+                        response_text = result['candidates'][0]['content']['parts'][0]['text']
+                        response_text = re.sub(r'```json\n|```', '', response_text).strip()
+                        
+                        # Parse the JSON response
+                        edit_result = json.loads(response_text)
+                        
+                        # Validate the response
+                        if 'edited_content' not in edit_result:
+                            raise ValueError("Invalid response: missing 'edited_content' field")
+                            
+                        # Ensure required fields with defaults
+                        edit_result.setdefault('changes_made', [{"type": "modification", "description": "Applied edit based on instruction"}])
+                        edit_result.setdefault('confidence', 0.8)
+                        edit_result.setdefault('notes', '')
+                        edit_result.setdefault('needs_review', False)
+                        edit_result.setdefault('suggested_next_steps', [])
+                        
+                        # Add original content and instruction to the result
+                        edit_result.update({
+                            'success': True,
+                            'original_content': document_text,
+                            'edit_instruction': edit_instruction,
+                            'timestamp': datetime.utcnow().isoformat()
+                        })
+                        
+                        return edit_result
+                        
+                    except (json.JSONDecodeError, KeyError, ValueError) as e:
+                        logger.error(f"Failed to parse AI edit response: {str(e)}")
+                        # Fallback to a structured response with the raw edit
+                        return {
+                            'success': True,
+                            'original_content': document_text,
+                            'edited_content': response_text,
+                            'edit_instruction': edit_instruction,
+                            'changes_made': [{
+                                'type': 'modification',
+                                'description': 'Applied edit based on instruction (fallback)',
+                                'notes': 'The AI response format was unexpected. Review carefully.'
+                            }],
+                            'confidence': 0.6,
+                            'needs_review': True,
+                            'suggested_next_steps': [
+                                "Review the changes for accuracy",
+                                "Consider rephrasing the edit instruction if needed"
+                            ]
+                        }
+            
+            # Handle API errors
+            error_msg = f"API Error: {response.status_code}"
+            if response.text:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get('error', {}).get('message', str(error_data))
+                except:
+                    error_msg = response.text[:500]
+            
+            logger.error(f"Smart Edit API error: {error_msg}")
             return {
                 'success': False,
-                'error': str(e),
-                'edit_instruction': edit_instruction
+                'error': f"Failed to process edit: {error_msg}",
+                'edit_instruction': edit_instruction,
+                'needs_review': True,
+                'suggested_next_steps': [
+                    "Check your internet connection",
+                    "Verify the API key is valid",
+                    "Try again with a simpler edit instruction"
+                ]
+            }
+                
+        except Exception as e:
+            logger.error(f"Error in smart_edit_content: {str(e)}", exc_info=True)
+            return {
+                'success': False,
+                'error': f"An unexpected error occurred: {str(e)}",
+                'edit_instruction': edit_instruction,
+                'needs_review': True,
+                'suggested_next_steps': [
+                    "Try again with a different edit instruction",
+                    "Check the server logs for more details"
+                ]
             }
     
     def convert_document_format(self, content: str, source_format: str, target_format: str, 
@@ -1052,25 +1189,58 @@ Please provide the requested summary following the format instructions above."""
                 'summary_type': summary_type
             }
     
-    def answer_question(self, document_text: str, question: str, document_id: int = None, user_id: int = None) -> tuple[str, str]:
-        """Answer a question about a document (wrapper for ai_question_answer)"""
+    def answer_question(self, document_text: str, question: str, document_id: int = None, 
+                       user_id: int = None, chat_history: list = None) -> tuple[str, str]:
+        """Answer a question about a document with chat history context
+        
+        Args:
+            document_text: The text content of the document
+            question: The user's question about the document
+            document_id: Optional ID of the document in database
+            user_id: Optional ID of the user asking the question
+            chat_history: List of previous chat messages for context
+            
+        Returns:
+            tuple: (answer_text, job_uuid) or (error_message, None)
+        """
         try:
-            result = self.ai_question_answer(document_text, question)
-            if result['success']:
-                # Save processing job
+            # Build context with document and chat history
+            context = f"Document Content:\n{document_text}"
+            
+            if chat_history:
+                # Add last 5 messages for context
+                context += "\n\nChat History:"
+                for msg in chat_history[-5:]:
+                    role = "User" if msg.get('role') == 'user' else "AI"
+                    context += f"\n{role}: {msg.get('content', '')}"
+            
+            # Get AI response with context
+            result = self.ai_question_answer(context, question)
+            
+            if result.get('success'):
+                answer = result['answer']
+                
+                # Save processing job with metadata
                 job = ProcessingJob(
                     job_type='qa',
                     input_text=question,
-                    output_text=result['answer'],
+                    output_text=answer,
                     document_id=document_id,
                     user_id=user_id,
-                    status='completed'
+                    status='completed',
+                    metadata={
+                        'model': 'gemini-pro',
+                        'context_length': len(context),
+                        'chat_history_used': len(chat_history) if chat_history else 0
+                    }
                 )
                 db.session.add(job)
                 db.session.commit()
-                return result['answer'], job.uuid
-            else:
-                return result.get('error', 'Failed to answer question'), None
+                
+                return answer, job.uuid
+                
+            return result.get('error', 'Failed to generate answer'), None
+            
         except Exception as e:
-            logger.error(f"Error in answer_question: {str(e)}")
-            return str(e), None
+            logger.error(f"Error in answer_question: {str(e)}", exc_info=True)
+            return f"An error occurred while processing your question: {str(e)}", None

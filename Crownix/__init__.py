@@ -50,6 +50,9 @@ def create_app():
     # Import and register blueprints
     from .main import main as main_blueprint
     app.register_blueprint(main_blueprint, url_prefix='')
+    
+    from .api.insurance_endpoints import insurance_bp
+    app.register_blueprint(insurance_bp)
 
     # Register database commands
     from .init_db import register_commands

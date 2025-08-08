@@ -12,6 +12,7 @@ from google.auth.transport import requests as google_requests
 from .extensions import db, bcrypt
 from .models import User, Document, ChatMessage
 from .document_processor import DocumentProcessor
+from .api.insurance_endpoints import insurance_bp
 from functools import wraps
 
 main = Blueprint('main', __name__)
@@ -40,6 +41,11 @@ def allowed_file(filename):
 def index():
     """Serve the main HTML page"""
     return render_template('index.html')
+
+@main.route('/insurance')
+def insurance_analyzer():
+    """Serve the insurance policy analyzer page"""
+    return render_template('insurance.html')
 
 # --- AUTHENTICATION ROUTES ---
 

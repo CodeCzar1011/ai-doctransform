@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI DocTransform - Test Upload</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f7fa;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .upload-section, .chat-section {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            flex: 1;
+        }
+        
+        .chat-section {
+            display: none;
+            flex-direction: column;
+        }
+        
+        .upload-container {
+            border: 2px dashed #ccc;
+            padding: 40px 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            transition: all 0.3s;
+            background-color: #f9f9f9;
+        }
+        #fileInput {
+            display: none;
+        }
+        .btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+            margin: 15px 0;
+        }
+        .btn:hover {
+            background-color: #3d8b3d;
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+        }
+        .btn-secondary:hover {
+            background-color: #5a6268;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .file-info {
+            margin: 15px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            border-left: 4px solid #4CAF50;
+        }
+        .action-buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>AI DocTransform - Test Upload</h1>
+    
+    <div class="container">
+        <div class="upload-section">
+            <div class="upload-container" id="dropZone">
+                <h3>📁 Drag & Drop your document here</h3>
+                <p>or</p>
+                <input type="file" id="fileInput" />
+                <button class="btn" onclick="document.getElementById('fileInput').click()">Select File</button>
+                <p>Supported formats: PDF, DOCX, DOC, PNG, JPG, JPEG, GIF, BMP, TIFF</p>
+                <p class="file-info" id="fileInfo" style="display: none;"></p>
+            </div>
+            
+            <div id="status"></div>
+            
+            <div class="action-buttons" id="actionButtons" style="display: none;">
+                <button class="btn" id="newUploadBtn">Upload Another File</button>
+                <button class="btn btn-secondary" id="viewTextBtn">View Extracted Text</button>
+            </div>
+            
+            <div id="extractedText" style="margin-top: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 6px; display: none; background-color: #f9f9f9; white-space: pre-wrap;"></div>
+        </div>
+    </div>
+    
+    <div id="response" style="display: none; margin-top: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 6px; background-color: #f9f9f9; white-space: pre-wrap;"></div>
+
+    <script>
+        // DOM Elements
+        const fileInput = document.getElementById('fileInput');
+        const statusDiv = document.getElementById('status');
+        const responseDiv = document.getElementById('response');
+        const dropZone = document.getElementById('dropZone');
+        const fileInfo = document.getElementById('fileInfo');
+        const actionButtons = document.getElementById('actionButtons');
+        const extractedText = document.getElementById('extractedText');
+        const newUploadBtn = document.getElementById('newUploadBtn');
+        const viewTextBtn = document.getElementById('viewTextBtn');
+        
+        // State
+        let currentDocument = null;
+        
+        // Event Listeners
+        fileInput.addEventListener('change', handleFileSelect);
+        newUploadBtn.addEventListener('click', resetUploadForm);
+        viewTextBtn.addEventListener('click', toggleExtractedText);
+        
+        // Drag and Drop Handlers
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('drag-over'), false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('drag-over'), false);
+        });
+        
+        dropZone.addEventListener('drop', handleDrop, false);
+        
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) {
+                handleFiles(files);
+            }
+        }
+        
+        function handleFileSelect(e) {
+            const files = e.target.files;
+            if (files.length > 0) {
+                handleFiles(files);
+            }
+        }
+        
+        function handleFiles(files) {
+            if (files.length === 0) return;
+            
+            const file = files[0];
+            uploadFile(file);
+        }
+        
+        // Toggle extracted text visibility
+        function toggleExtractedText() {
+            const isVisible = extractedText.style.display === 'block';
+            extractedText.style.display = isVisible ? 'none' : 'block';
+            viewTextBtn.textContent = isVisible ? 'View Extracted Text' : 'Hide Extracted Text';
+        }
+        
+        // Reset upload form
+        function resetUploadForm() {
+            fileInput.value = '';
+            statusDiv.textContent = '';
+            statusDiv.className = '';
+            extractedText.style.display = 'none';
+            extractedText.textContent = '';
+            actionButtons.style.display = 'none';
+            fileInfo.style.display = 'none';
+            currentDocument = null;
+        }
+        
+        // Format file size
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // Handle file upload
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            statusDiv.textContent = 'Uploading...';
+            statusDiv.className = '';
+            responseDiv.textContent = '';
+            
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    // Show success message
+                    statusDiv.innerHTML = '<span style="color: #155724;">✅ File uploaded successfully!</span>';
+                    statusDiv.className = 'success';
+                    
+                    // Store the document data
+                    currentDocument = result.document || {};
+                    
+                    // Show file info
+                    fileInfo.style.display = 'block';
+                    fileInfo.innerHTML = `
+                        <strong>File:</strong> ${currentDocument.filename}<br>
+                        <strong>Type:</strong> ${currentDocument.file_type ? currentDocument.file_type.toUpperCase() : 'N/A'}<br>
+                        <strong>Size:</strong> ${currentDocument.file_size ? formatFileSize(currentDocument.file_size) : 'N/A'}
+                    `;
+                    
+                    // Show action buttons
+                    actionButtons.style.display = 'flex';
+                    
+                    // Store extracted text
+                    if (currentDocument.extracted_text) {
+                        extractedText.textContent = currentDocument.extracted_text;
+                    }
+                    
+                    // Show the response in the debug div (hidden by default)
+                    responseDiv.textContent = JSON.stringify(result, null, 2);
+                    
+                    return result;
+                } else {
+                    throw new Error(result.error || 'Upload failed');
+                }
+            } catch (error) {
+                console.error('Upload error:', error);
+                statusDiv.innerHTML = `<span style="color: #721c24;">❌ Error: ${error.message}</span>`;
+                statusDiv.className = 'error';
+                throw error;
+            }
+        }
+    </script>
+</body>
+</html>

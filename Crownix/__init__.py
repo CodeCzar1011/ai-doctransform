@@ -1,5 +1,6 @@
 import os
 from flask import Flask
+from flask_cors import CORS
 from dotenv import load_dotenv
 
 # Import extensions
@@ -39,6 +40,21 @@ def create_app():
     bcrypt.init_app(app)
     login_manager.init_app(app)
     migrate.init_app(app, db)
+    
+    # Enable CORS for all routes
+    CORS(app, resources={
+        r"/*": {
+            "origins": [
+                "https://ai-doctransform.onrender.com",
+                "http://localhost:5000",
+                "http://127.0.0.1:5000",
+                "file://"
+            ],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": True
+        }
+    })
 
     # Import models here for the user_loader and create_all
     from . import models

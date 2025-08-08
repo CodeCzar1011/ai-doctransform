@@ -47,7 +47,7 @@ class DocumentProcessor:
     
     def __init__(self, gemini_api_key: str):
         self.gemini_api_key = gemini_api_key
-        self.gemini_api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+        self.gemini_api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
         
     def extract_enhanced_text(self, file_path: str, file_type: str) -> Dict[str, Any]:
         """Enhanced text extraction with metadata"""

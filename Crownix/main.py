@@ -240,17 +240,25 @@ def google_auth():
         }), 500
 
 # --- DOCUMENT & FILE ROUTES ---
-@main.route('/upload', methods=['POST'])
-@api_login_required
+@main.route('/api/upload', methods=['POST', 'OPTIONS'])
 def upload_file():
     """Handle file upload and text extraction"""
+    if request.method == 'OPTIONS':
+        # Handle preflight request
+        response = jsonify({'status': 'preflight'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        return response
+        
     try:
         # File validation
         if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+            
         file = request.files['file']
         if file.filename == '' or not allowed_file(file.filename):
-            return jsonify({'error': 'Invalid or no file selected'}), 400
+            return jsonify({'success': False, 'error': 'Invalid or no file selected'}), 400
         
         # File size validation (16MB limit)
         file.seek(0, os.SEEK_END)
@@ -258,51 +266,81 @@ def upload_file():
         file.seek(0)  # Reset file pointer
         
         if file_size > 16 * 1024 * 1024:  # 16MB limit
-            return jsonify({'error': 'File size exceeds 16MB limit'}), 400
+            return jsonify({'success': False, 'error': 'File size exceeds 16MB limit'}), 400
         
         # Secure filename handling
         filename = secure_filename(file.filename)
         if not filename:
-            return jsonify({'error': 'Invalid filename'}), 400
+            return jsonify({'success': False, 'error': 'Invalid filename'}), 400
             
         file_extension = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
         unique_filename = f"{uuid.uuid4()}_{filename}"
-        file_path = os.path.join('uploads', unique_filename)
+        upload_folder = os.path.join(os.getcwd(), 'uploads')
+        os.makedirs(upload_folder, exist_ok=True)
+        file_path = os.path.join(upload_folder, unique_filename)
         
-        # Ensure uploads directory exists
-        os.makedirs('uploads', exist_ok=True)
+        # Save the file
         file.save(file_path)
-
+        
+        # Process the file
         extraction_result = doc_processor.extract_enhanced_text(file_path, file_extension)
         if not extraction_result['success']:
             if os.path.exists(file_path):
-                os.remove(file_path) # Clean up failed upload
-            return jsonify({'error': extraction_result.get('error', 'Failed to process file')}), 500
+                os.remove(file_path)  # Clean up failed upload
+            return jsonify({
+                'success': False,
+                'error': extraction_result.get('error', 'Failed to process file')
+            }), 500
 
+        # Create document record (without user ID for now)
         document = Document(
             uuid=str(uuid.uuid4()),
-            user_id=current_user.id,
+            user_id=current_user.get_id() if current_user.is_authenticated else None,
             filename=filename,
             file_path=file_path,
             file_type=file_extension,
             file_size=file_size,
-            extracted_text=extraction_result['text'],
+            extracted_text=extraction_result.get('text', ''),
             doc_metadata=json.dumps(extraction_result.get('metadata', {})),
             upload_timestamp=datetime.utcnow()
         )
+        
         db.session.add(document)
         db.session.commit()
 
-        return jsonify({'success': True, 'document': document.to_dict()})
+        response = jsonify({
+            'success': True,
+            'message': 'File uploaded successfully',
+            'document': {
+                'id': document.id,
+                'uuid': document.uuid,
+                'filename': document.filename,
+                'file_type': document.file_type,
+                'file_size': document.file_size,
+                'extracted_text': document.extracted_text,
+                'metadata': json.loads(document.doc_metadata) if document.doc_metadata else {}
+            }
+        })
+        
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response
+        
     except Exception as e:
-        logger.error(f"Upload Error: {e}")
+        logger.error(f"Upload Error: {str(e)}", exc_info=True)
         # Clean up file if it was saved
         try:
             if 'file_path' in locals() and os.path.exists(file_path):
                 os.remove(file_path)
-        except:
-            pass
-        return jsonify({'error': 'An unexpected error occurred during upload.'}), 500
+        except Exception as cleanup_error:
+            logger.error(f"Error cleaning up file: {str(cleanup_error)}")
+            
+        response = jsonify({
+            'success': False,
+            'error': 'An unexpected error occurred during upload.',
+            'details': str(e)
+        })
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 500
 
 @main.route('/download/<filename>')
 @api_login_required
